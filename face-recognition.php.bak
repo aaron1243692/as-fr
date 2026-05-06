@@ -1,0 +1,379 @@
+<?php
+include 'config/connection.php';
+include 'config/face-auth.php';
+
+face_auth_start_session();
+face_auth_ensure_schema($conn);
+
+if (!empty($_SESSION['id']) && empty($_SESSION['pending_face_user_id'])) {
+    header('location: dashboard.php');
+    exit;
+}
+
+$pendingUserId = face_auth_current_pending_user_id();
+
+if ($pendingUserId <= 0) {
+    $_SESSION['message'] = 'Please sign in first.';
+    header('location: sign-in.php');
+    exit;
+}
+
+$face = face_auth_get_user_face($conn, $pendingUserId);
+$hasRegisteredFace = $face !== null && !empty($face['descriptors_map']);
+$recentFailures = face_auth_count_recent_failures($conn, $pendingUserId, 15);
+
+if (!empty($_SESSION['message'])) {
+    echo "
+        <script>
+            alert('" . $_SESSION['message'] . "');
+        </script>
+    ";
+    unset($_SESSION['message']);
+}
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php include 'include/title.php'; ?>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="min-h-screen bg-slate-100">
+    <main class="min-h-screen flex items-center justify-center p-4">
+        <section class="w-full max-w-5xl bg-white rounded-4 shadow-lg border p-4 md:p-5">
+            <div class="flex flex-col gap-3 mb-4">
+                <h1 class="text-2xl font-bold text-slate-800">Face Verification</h1>
+                <p class="text-slate-600 mb-0">
+                    Password sign-in already passed. <?php echo $hasRegisteredFace ? 'Complete face verification to continue.' : 'No face data is registered, so the system will continue after confirmation.'; ?>
+                </p>
+                <div class="rounded-3 px-3 py-2 <?php echo $hasRegisteredFace ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'; ?>">
+                    Registered face: <strong><?php echo $hasRegisteredFace ? 'Yes' : 'No'; ?></strong>
+                    <?php if ($recentFailures > 0): ?>
+                        <span class="ms-2">Recent failed attempts: <?php echo (int) $recentFailures; ?>/5</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <div class="rounded-4 border bg-slate-950 overflow-hidden min-h-[20rem] flex items-center justify-center">
+                    <video id="video" autoplay playsinline muted class="w-full h-full object-cover"></video>
+                </div>
+
+                <div class="rounded-4 border bg-slate-50 p-4 flex flex-col gap-3">
+                    <div id="statusBox" class="rounded-3 bg-sky-50 text-sky-700 px-3 py-2">
+                        Initializing camera and face models...
+                    </div>
+
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 text-sm">
+                        <div id="stepBlink" class="rounded-3 border px-3 py-2 text-slate-600">Blink once</div>
+                        <div id="stepLeft" class="rounded-3 border px-3 py-2 text-slate-600">Turn left</div>
+                        <div id="stepRight" class="rounded-3 border px-3 py-2 text-slate-600">Turn right</div>
+                    </div>
+
+                    <div class="rounded-3 border bg-white p-3">
+                        <p class="font-semibold text-slate-700 mb-2">Live instructions</p>
+                        <p id="instructionText" class="mb-0 text-slate-600">
+                            Center your face inside the camera frame.
+                        </p>
+                    </div>
+
+                    <div id="previewBox" class="rounded-4 border bg-white min-h-[13rem] flex items-center justify-center overflow-hidden">
+                        <span class="text-slate-400">No verified capture yet</span>
+                    </div>
+
+                    <div class="flex flex-wrap gap-2">
+                        <button type="button" id="startBtn" class="btn btn-primary">Start Verification</button>
+                        <button type="button" id="retryBtn" class="btn btn-outline-secondary">Retry</button>
+                        <a href="sign-in.php" class="btn btn-outline-danger">Back to Sign-in</a>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <script>
+    const registeredFace = <?php echo $hasRegisteredFace ? 'true' : 'false'; ?>;
+    const failureCount = <?php echo (int) $recentFailures; ?>;
+    const maxFailures = 5;
+    const video = document.getElementById('video');
+    const statusBox = document.getElementById('statusBox');
+    const instructionText = document.getElementById('instructionText');
+    const previewBox = document.getElementById('previewBox');
+    const startBtn = document.getElementById('startBtn');
+    const retryBtn = document.getElementById('retryBtn');
+    const stepBlink = document.getElementById('stepBlink');
+    const stepLeft = document.getElementById('stepLeft');
+    const stepRight = document.getElementById('stepRight');
+
+    const liveness = { blink: false, turn_left: false, turn_right: false };
+    let stream = null;
+    let modelsLoaded = false;
+    let verifying = false;
+    let lastDescriptor = null;
+    let consecutiveFrames = 0;
+    let blinkBaseline = null;
+
+    function setStep(el, done) {
+        el.className = done
+            ? 'rounded-3 border px-3 py-2 bg-emerald-50 text-emerald-700 border-emerald-200'
+            : 'rounded-3 border px-3 py-2 text-slate-600';
+    }
+
+    function setStatus(message, tone = 'info') {
+        const tones = {
+            info: 'bg-sky-50 text-sky-700',
+            success: 'bg-emerald-50 text-emerald-700',
+            warning: 'bg-amber-50 text-amber-700',
+            danger: 'bg-rose-50 text-rose-700'
+        };
+
+        statusBox.className = `rounded-3 px-3 py-2 ${tones[tone] || tones.info}`;
+        statusBox.textContent = message;
+    }
+
+    function eyeAspectRatio(points) {
+        const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+        const vertical1 = dist(points[1], points[5]);
+        const vertical2 = dist(points[2], points[4]);
+        const horizontal = dist(points[0], points[3]);
+        return horizontal ? (vertical1 + vertical2) / (2 * horizontal) : 0;
+    }
+
+    function estimateYaw(landmarks) {
+        const nose = landmarks.getNose();
+        const jaw = landmarks.getJawOutline();
+        if (!nose.length || jaw.length < 17) {
+            return 0;
+        }
+
+        const noseTip = nose[3] || nose[Math.floor(nose.length / 2)];
+        const leftJaw = jaw[0];
+        const rightJaw = jaw[16];
+        const midpoint = (leftJaw.x + rightJaw.x) / 2;
+        const width = Math.max(1, rightJaw.x - leftJaw.x);
+        return (noseTip.x - midpoint) / width;
+    }
+
+    async function loadModels() {
+        if (modelsLoaded) {
+            return true;
+        }
+
+        try {
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri('/system/models'),
+                faceapi.nets.faceLandmark68Net.loadFromUri('/system/models'),
+                faceapi.nets.faceRecognitionNet.loadFromUri('/system/models')
+            ]);
+            modelsLoaded = true;
+            return true;
+        } catch (error) {
+            try {
+                await Promise.all([
+                    faceapi.nets.tinyFaceDetector.loadFromUri('models'),
+                    faceapi.nets.faceLandmark68Net.loadFromUri('models'),
+                    faceapi.nets.faceRecognitionNet.loadFromUri('models')
+                ]);
+                modelsLoaded = true;
+                return true;
+            } catch (fallbackError) {
+                setStatus('Unable to load face recognition models from the models folder.', 'danger');
+                return false;
+            }
+        }
+    }
+
+    async function startCamera() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            setStatus('No camera detected in this browser. Face verification is required.', 'danger');
+            return false;
+        }
+
+        try {
+            stream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
+            video.srcObject = stream;
+            await video.play();
+            return true;
+        } catch (error) {
+            setStatus('Camera access failed. Face verification cannot continue without a camera.', 'danger');
+            return false;
+        }
+    }
+
+    function resetFlow() {
+        liveness.blink = false;
+        liveness.turn_left = false;
+        liveness.turn_right = false;
+        lastDescriptor = null;
+        consecutiveFrames = 0;
+        blinkBaseline = null;
+        setStep(stepBlink, false);
+        setStep(stepLeft, false);
+        setStep(stepRight, false);
+        previewBox.innerHTML = '<span class="text-slate-400">No verified capture yet</span>';
+    }
+
+    async function submitVerification(cameraAvailable) {
+        const response = await fetch('config/face-login.php', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                descriptor: lastDescriptor,
+                liveness,
+                camera_available: cameraAvailable
+            })
+        });
+
+        const result = await response.json();
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || 'Face verification failed.');
+        }
+
+        setStatus(result.message || 'Verification successful. Redirecting...', 'success');
+        setTimeout(() => {
+            window.location.href = 'dashboard.php';
+        }, 900);
+    }
+
+    async function runVerification() {
+        if (verifying) {
+            return;
+        }
+
+        verifying = true;
+        resetFlow();
+
+        if (!registeredFace) {
+            setStatus('No registered face was found. Continuing to the system.', 'success');
+            try {
+                await submitVerification(true);
+            } catch (error) {
+                setStatus(error.message, 'danger');
+            } finally {
+                verifying = false;
+            }
+            return;
+        }
+
+        if (failureCount >= maxFailures) {
+            setStatus('Too many failed attempts in the last 15 minutes. Try again later.', 'danger');
+            verifying = false;
+            return;
+        }
+
+        const cameraReady = await startCamera();
+        const modelsReady = cameraReady ? await loadModels() : false;
+
+        if (!cameraReady || !modelsReady) {
+            try {
+                await submitVerification(false);
+            } catch (error) {
+                setStatus(error.message, 'danger');
+            } finally {
+                verifying = false;
+            }
+            return;
+        }
+
+        setStatus('Camera ready. Follow the liveness steps.', 'info');
+
+        const loop = async () => {
+            if (!verifying) {
+                return;
+            }
+
+            const detection = await faceapi
+                .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (!detection) {
+                consecutiveFrames = 0;
+                instructionText.textContent = 'Keep your face centered and well lit.';
+                requestAnimationFrame(loop);
+                return;
+            }
+
+            const leftEye = detection.landmarks.getLeftEye();
+            const rightEye = detection.landmarks.getRightEye();
+            const ear = (eyeAspectRatio(leftEye) + eyeAspectRatio(rightEye)) / 2;
+            const yaw = estimateYaw(detection.landmarks);
+
+            if (blinkBaseline === null && ear > 0.22) {
+                blinkBaseline = ear;
+            }
+
+            if (blinkBaseline !== null && ear < blinkBaseline * 0.72) {
+                liveness.blink = true;
+                setStep(stepBlink, true);
+            }
+
+            if (yaw < -0.08) {
+                liveness.turn_left = true;
+                setStep(stepLeft, true);
+            }
+
+            if (yaw > 0.08) {
+                liveness.turn_right = true;
+                setStep(stepRight, true);
+            }
+
+            if (!liveness.blink) {
+                instructionText.textContent = 'Blink once naturally.';
+            } else if (!liveness.turn_left) {
+                instructionText.textContent = 'Turn your head slightly to the left.';
+            } else if (!liveness.turn_right) {
+                instructionText.textContent = 'Turn your head slightly to the right.';
+            } else {
+                instructionText.textContent = 'Hold still for a moment.';
+                consecutiveFrames += 1;
+                lastDescriptor = Array.from(detection.descriptor);
+            }
+
+            if (liveness.blink && liveness.turn_left && liveness.turn_right && consecutiveFrames >= 8) {
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth || 640;
+                canvas.height = video.videoHeight || 480;
+                canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+                previewBox.innerHTML = `<img src="${canvas.toDataURL('image/png')}" class="w-full h-full object-cover" alt="Verified capture">`;
+                setStatus('Submitting face verification...', 'warning');
+
+                try {
+                    await submitVerification(true);
+                } catch (error) {
+                    setStatus(error.message, 'danger');
+                    verifying = false;
+                }
+                return;
+            }
+
+            requestAnimationFrame(loop);
+        };
+
+        requestAnimationFrame(loop);
+    }
+
+    startBtn.addEventListener('click', runVerification);
+    retryBtn.addEventListener('click', () => {
+        verifying = false;
+        resetFlow();
+        setStatus('Ready to retry.', 'info');
+    });
+
+    window.addEventListener('beforeunload', () => {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+    });
+
+    setStep(stepBlink, false);
+    setStep(stepLeft, false);
+    setStep(stepRight, false);
+    setStatus(registeredFace ? 'Start when you are ready to verify your face.' : 'No face data is registered for this account.', registeredFace ? 'info' : 'warning');
+    </script>
+</body>
+</html>

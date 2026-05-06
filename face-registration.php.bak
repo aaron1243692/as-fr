@@ -1,0 +1,274 @@
+<?php
+    include 'include/session.php';
+
+    $faceRecord = face_auth_get_user_face($conn, (int) $_SESSION['id']);
+    $registeredCount = $faceRecord ? count($faceRecord['descriptors_map']) : 0;
+?>
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <?php include 'include/title.php';?>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+</head>
+
+<body class="vh-100 bg-gray-200 flex flex-row justify-content-center">
+
+    <?php include 'include/aside.php'; ?>
+
+    <main class="flex flex-1 flex-col h-full align-center gap-2 p-2">
+        <?php include 'include/header.php'; ?>
+
+        <section class="w-full flex flex-1 flex-col gap-4 rounded-4 border bg-white p-4 shadow-sm">
+            <div>
+                <h2 class="text-2xl font-bold text-gray-800">Face Registration</h2>
+                <p class="text-sm text-gray-600 mb-0">
+                    Capture three angles so face verification can be required after password login only when face data exists.
+                </p>
+                <p class="text-sm text-gray-600 mt-2">
+                    Current status:
+                    <span class="font-semibold"><?= $registeredCount > 0 ? 'Face registered' : 'No registered face yet'; ?></span>
+                </p>
+            </div>
+
+            <div class="grid gap-4 md:grid-cols-2">
+                <div class="rounded-4 border bg-black overflow-hidden min-h-[22rem] flex items-center justify-center">
+                    <video id="video" autoplay muted playsinline class="w-full h-full object-cover"></video>
+                </div>
+
+                <div class="rounded-4 border p-4 bg-gray-50">
+                    <div class="mb-3">
+                        <p class="text-sm text-gray-500 mb-1">Step</p>
+                        <h3 id="poseTitle" class="text-xl font-semibold text-gray-800">Front</h3>
+                        <p id="poseHint" class="text-sm text-gray-600 mb-0">Look straight at the camera.</p>
+                    </div>
+
+                    <div id="statusBox" class="rounded-3 bg-blue-50 text-blue-700 px-3 py-2 text-sm">
+                        Loading camera and models...
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-3 mt-4">
+                        <div class="rounded-3 border bg-white p-2 text-center">
+                            <p class="text-xs text-gray-500 mb-2">Front</p>
+                            <img id="preview-front" class="w-full h-28 object-cover rounded-3 bg-gray-100 hidden" alt="Front preview">
+                            <p id="label-front" class="text-xs text-gray-400 mb-0">Pending</p>
+                        </div>
+                        <div class="rounded-3 border bg-white p-2 text-center">
+                            <p class="text-xs text-gray-500 mb-2">Left</p>
+                            <img id="preview-left" class="w-full h-28 object-cover rounded-3 bg-gray-100 hidden" alt="Left preview">
+                            <p id="label-left" class="text-xs text-gray-400 mb-0">Pending</p>
+                        </div>
+                        <div class="rounded-3 border bg-white p-2 text-center">
+                            <p class="text-xs text-gray-500 mb-2">Right</p>
+                            <img id="preview-right" class="w-full h-28 object-cover rounded-3 bg-gray-100 hidden" alt="Right preview">
+                            <p id="label-right" class="text-xs text-gray-400 mb-0">Pending</p>
+                        </div>
+                    </div>
+
+                    <form action="config/face-registration.php" method="post" id="faceRegistrationForm" class="mt-4">
+                        <input type="hidden" name="descriptors" id="descriptorsInput">
+                        <input type="hidden" name="angles" id="anglesInput">
+
+                        <div class="flex flex-wrap gap-3">
+                            <button type="button" id="captureBtn" class="px-4 py-2 rounded-3 bg-green-600 text-white font-semibold hover:bg-green-700">
+                                Capture Current Angle
+                            </button>
+                            <button type="submit" id="submitBtn" class="px-4 py-2 rounded-3 bg-blue-600 text-white font-semibold hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                Save Face Data
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            </div>
+        </section>
+    </main>
+
+<script>
+const poses = [
+    { key: 'front', title: 'Front', hint: 'Look straight at the camera.', minYaw: -0.08, maxYaw: 0.08 },
+    { key: 'left', title: 'Left', hint: 'Turn your head slightly to your left.', minYaw: 0.09, maxYaw: 0.45 },
+    { key: 'right', title: 'Right', hint: 'Turn your head slightly to your right.', minYaw: -0.45, maxYaw: -0.09 }
+];
+
+const video = document.getElementById('video');
+const statusBox = document.getElementById('statusBox');
+const captureBtn = document.getElementById('captureBtn');
+const submitBtn = document.getElementById('submitBtn');
+const poseTitle = document.getElementById('poseTitle');
+const poseHint = document.getElementById('poseHint');
+const descriptorsInput = document.getElementById('descriptorsInput');
+const anglesInput = document.getElementById('anglesInput');
+
+let currentPoseIndex = 0;
+let cameraReady = false;
+let modelsReady = false;
+const capturedDescriptors = {};
+const capturedAngles = {};
+
+function setStatus(message, tone = 'blue') {
+    const tones = {
+        blue: 'bg-blue-50 text-blue-700',
+        green: 'bg-green-50 text-green-700',
+        red: 'bg-red-50 text-red-700',
+        yellow: 'bg-yellow-50 text-yellow-700'
+    };
+    statusBox.className = `rounded-3 px-3 py-2 text-sm ${tones[tone] || tones.blue}`;
+    statusBox.textContent = message;
+}
+
+function updateStep() {
+    const pose = poses[currentPoseIndex];
+    if (!pose) {
+        poseTitle.textContent = 'Complete';
+        poseHint.textContent = 'All required angles were captured.';
+        captureBtn.disabled = true;
+        submitBtn.disabled = false;
+        setStatus('All face angles captured. Save to finish registration.', 'green');
+        return;
+    }
+
+    poseTitle.textContent = pose.title;
+    poseHint.textContent = pose.hint;
+}
+
+function updateHiddenInputs() {
+    descriptorsInput.value = JSON.stringify(capturedDescriptors);
+    anglesInput.value = JSON.stringify(capturedAngles);
+    submitBtn.disabled = Object.keys(capturedDescriptors).length !== poses.length;
+}
+
+function estimateYaw(landmarks) {
+    const jaw = landmarks.getJawOutline();
+    const nose = landmarks.getNose();
+    const leftX = jaw[0].x;
+    const rightX = jaw[16].x;
+    const centerX = (leftX + rightX) / 2;
+    const faceWidth = Math.max(rightX - leftX, 1);
+    const noseX = nose[3].x;
+
+    return (noseX - centerX) / faceWidth;
+}
+
+function validatePose(yaw, pose) {
+    return yaw >= pose.minYaw && yaw <= pose.maxYaw;
+}
+
+async function loadModels() {
+    const paths = ['/system/models', 'models'];
+
+    for (const basePath of paths) {
+        try {
+            await Promise.all([
+                faceapi.nets.tinyFaceDetector.loadFromUri(basePath),
+                faceapi.nets.faceLandmark68Net.loadFromUri(basePath),
+                faceapi.nets.faceRecognitionNet.loadFromUri(basePath)
+            ]);
+            modelsReady = true;
+            return;
+        } catch (error) {
+            // Try next path.
+        }
+    }
+
+    throw new Error('Face models could not be loaded.');
+}
+
+async function initCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('No camera support detected in this browser.');
+    }
+
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: 640, height: 480 },
+        audio: false
+    });
+
+    video.srcObject = stream;
+    cameraReady = true;
+}
+
+function capturePreview() {
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.9);
+}
+
+captureBtn.addEventListener('click', async () => {
+    if (!cameraReady || !modelsReady) {
+        setStatus('Camera or models are not ready yet.', 'red');
+        return;
+    }
+
+    const pose = poses[currentPoseIndex];
+    if (!pose) {
+        return;
+    }
+
+    setStatus(`Checking ${pose.title.toLowerCase()} angle...`, 'yellow');
+
+    const detection = await faceapi
+        .detectSingleFace(video, new faceapi.TinyFaceDetectorOptions())
+        .withFaceLandmarks()
+        .withFaceDescriptor();
+
+    if (!detection) {
+        setStatus('No face detected. Center your face and try again.', 'red');
+        return;
+    }
+
+    const yaw = estimateYaw(detection.landmarks);
+    if (!validatePose(yaw, pose)) {
+        setStatus(`Wrong angle for ${pose.title.toLowerCase()}. ${pose.hint}`, 'red');
+        return;
+    }
+
+    capturedDescriptors[pose.key] = Array.from(detection.descriptor);
+    capturedAngles[pose.key] = { yaw };
+
+    const preview = document.getElementById(`preview-${pose.key}`);
+    const label = document.getElementById(`label-${pose.key}`);
+    preview.src = capturePreview();
+    preview.classList.remove('hidden');
+    label.textContent = 'Captured';
+    label.className = 'text-xs text-green-600 mb-0 font-semibold';
+
+    currentPoseIndex += 1;
+    updateHiddenInputs();
+    updateStep();
+});
+
+document.getElementById('faceRegistrationForm').addEventListener('submit', (event) => {
+    if (Object.keys(capturedDescriptors).length !== poses.length) {
+        event.preventDefault();
+        setStatus('Front, left, and right face captures are all required.', 'red');
+    }
+});
+
+window.addEventListener('load', async () => {
+    updateStep();
+
+    try {
+        setStatus('Opening camera...', 'yellow');
+        await initCamera();
+        setStatus('Loading face recognition models...', 'yellow');
+        await loadModels();
+        setStatus('Camera ready. Capture the front angle first.', 'green');
+    } catch (error) {
+        captureBtn.disabled = true;
+        submitBtn.disabled = true;
+        setStatus(error.message || 'Unable to start face registration.', 'red');
+    }
+});
+</script>
+
+</body>
+</html>

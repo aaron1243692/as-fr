@@ -1,0 +1,43 @@
+/* Basic styling for the container */
+.input-wrapper {
+    position: relative;
+}
+
+/* Style for the input field */
+.input-field {
+    width: 100%;
+    padding: 0.5rem;
+    color: black;
+    border: 1px solid black;
+    transition: all 0.15s;
+    background-color: transparent;
+    outline: none; /* Removes the default blue outline */
+    font-size: 16px;
+    border-radius: 1rem;
+}
+
+/* Change border color when the input is focused */
+.input-field:focus-visible {
+    border-color: black; /* Example focus color (yellow) */
+}
+
+/* Initial position and style for the floating label */
+.input-wrapper label {
+    position: absolute;
+    top: 50%; /* Centers label vertically inside the input box */
+    left: 20px;
+    transform: translateY(-50%);
+    color: black;
+    transition: all 0.3s; /* Smooth animation */
+    pointer-events: none; /* Allows clicking on the label to focus the input */
+}
+
+/* Move label up and apply background when input is focused or has content */
+.input-field:focus ~ label,
+.input-field:not(:placeholder-shown) ~ label {
+    top: 0; /* Moves label to the top edge */
+    left: 15px;
+    font-size: 15px; /* Shrinks the label text */
+    background-color: rgb(255, 255, 255); /* White background to cover the border */
+    padding: 0 5px;
+}

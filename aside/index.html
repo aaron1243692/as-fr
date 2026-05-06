@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sidebar HTML CSS</title>
+    <link href="https://unpkg.com/boxicons@2.1.4/css/boxicons.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="dashboard-container">
+
+        
+        <aside id="sidebar">
+            <div class="sidebar-widget">
+                <div class="sidebar-logo">
+                    <a href="#">CodzSword</a>
+                </div>
+                <button class="toggle-btn" type="button">
+                    <i id="icon" class="bx bxs-chevrons-right"></i>
+                </button>
+            </div>
+            <!-- Sidebar Navigation Begins -->
+            <ul class="sidebar-nav">
+                <li class="sidebar-item">
+                    <a href="#" class="sidebar-link">
+                        <i class="bx bxs-user-account"></i>
+                        <span>Profile</span>
+                    </a>
+                </li>
+                <li class="sidebar-item">
+                    <a href="#" class="sidebar-link">
+                        <i class="bx bxs-layer"></i>
+                        <span>Task</span>
+                    </a>
+                </li>
+                <!-- <li class="sidebar-item">
+                    <a href="#" class="sidebar-link has-dropdown">
+                        <i class="bx bxs-bug-alt"></i>
+                        <span>Auth</span>
+                    </a>
+                    <ul class="sidebar-dropdown">
+                        <li class="sidebar-item">
+                            <a href="#" class="sidebar-link">
+                                Login
+                            </a>
+                            <a href="#" class="sidebar-link">
+                                Register
+                            </a>
+                        </li>
+                    </ul>
+                </li> -->
+                <!-- <li class="sidebar-item">
+                    <a href="#" class="sidebar-link has-dropdown">
+                        <i class="bx bxs-bar-chart-alt-2"></i>
+                        <span>Product</span>
+                    </a>
+                    <ul class="sidebar-dropdown">
+                        <li class="sidebar-item">
+                            <a href="#" class="sidebar-link">
+                                List
+                            </a>
+                            <a href="#" class="sidebar-link">
+                                Create
+                            </a>
+                            <a href="#" class="sidebar-link">
+                                Update
+                            </a>
+                        </li>
+                    </ul>
+                </li> -->
+                <li class="sidebar-header">
+                    Tools Components
+                </li>
+                <li class="sidebar-item">
+                    <a href="#" class="sidebar-link">
+                        <i class="bx bxs-bell-ring"></i>
+                        <span>Notification</span>
+                    </a>
+                </li>
+                <li class="sidebar-item">
+                    <a href="#" class="sidebar-link has-dropdown">
+                        <i class="bx bxs-news"></i>
+                        <span>Form</span>
+                    </a>
+                    <ul class="sidebar-dropdown">
+                        <li class="sidebar-item">
+                            <a href="#" class="sidebar-link">
+                                Feedback
+                            </a>
+                            <a href="#" class="sidebar-link">
+                                Application
+                            </a>
+                            <a href="#" class="sidebar-link">
+                                Expense
+                            </a>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+            <div class="sidebar-footer">
+                <h6>Weekly Sales Insights</h6>
+                <p>
+                    Download your weekly sales performance report now!
+                </p>
+                <a href="#" class="btn ">Download</a>
+            </div>
+        </aside>
+    </div>
+    <script>
+        const hamburger = document.querySelector(".toggle-btn");
+const toggler = document.querySelector("#icon");
+hamburger.addEventListener("click", function () {
+  document.querySelector("#sidebar").classList.toggle("expand");
+  toggler.classList.toggle("bxs-chevrons-right");
+  toggler.classList.toggle("bxs-chevrons-left");
+});
+
+// Toggle Sidebar Dropdown
+
+const items = document.querySelectorAll(".has-dropdown");
+
+function toggle() {
+  const itemToggle = this.classList.contains("active");
+
+  for (i = 0; i < items.length; i++) {
+    items[i].classList.remove("active");
+  }
+
+  if (!itemToggle) {
+    this.classList.add("active");
+  }
+}
+
+items.forEach((item) => item.addEventListener("click", toggle));
+
+    </script>
+</body>
+
+</html>
