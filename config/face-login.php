@@ -57,12 +57,12 @@ if (!is_array($descriptor) || count($descriptor) !== 128) {
     exit;
 }
 
-$requiredChecks = ['left', 'right', 'blink'];
+$requiredChecks = ['front', 'blink'];
 foreach ($requiredChecks as $check) {
     if (empty($liveness[$check])) {
         echo json_encode([
             'success' => false,
-            'message' => 'Complete all liveness checks before verifying.',
+            'message' => 'Complete the front-face and blink checks before verifying.',
             'attempts_remaining' => max(0, FACE_AUTH_MAX_ATTEMPTS - ((int) ($_SESSION['face_failed_attempts'] ?? 0)))
         ]);
         exit;

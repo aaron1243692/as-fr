@@ -65,8 +65,7 @@ $attemptsRemaining = max(0, FACE_AUTH_MAX_ATTEMPTS - $attemptsUsed);
                     <div class="rounded border p-4 bg-gray-50">
                         <p class="font-semibold text-gray-800 mb-2">Liveness checklist</p>
                         <div class="grid gap-2 text-sm">
-                            <div id="check-left" class="text-gray-600">Turn your head left</div>
-                            <div id="check-right" class="text-gray-600">Turn your head right</div>
+                            <div id="check-front" class="text-gray-600">Hold a front-facing pose</div>
                             <div id="check-blink" class="text-gray-600">Blink once</div>
                         </div>
                     </div>
@@ -97,8 +96,7 @@ const verifyBtn = document.getElementById('verifyBtn');
 const attemptsBox = document.getElementById('attemptsBox');
 
 const checks = {
-    left: document.getElementById('check-left'),
-    right: document.getElementById('check-right'),
+    front: document.getElementById('check-front'),
     blink: document.getElementById('check-blink')
 };
 
@@ -108,7 +106,7 @@ let currentDescriptor = null;
 let blinkClosed = false;
 let verificationBusy = false;
 let attemptsRemaining = <?php echo $attemptsRemaining; ?>;
-const liveness = { left: false, right: false, blink: false };
+const liveness = { front: false, blink: false };
 
 function setStatus(message, tone = 'info') {
     const classMap = {
@@ -123,10 +121,9 @@ function setStatus(message, tone = 'info') {
 }
 
 function updateChecks() {
-    checks.left.className = liveness.left ? 'text-green-600 font-semibold' : 'text-gray-600';
-    checks.right.className = liveness.right ? 'text-green-600 font-semibold' : 'text-gray-600';
+    checks.front.className = liveness.front ? 'text-green-600 font-semibold' : 'text-gray-600';
     checks.blink.className = liveness.blink ? 'text-green-600 font-semibold' : 'text-gray-600';
-    verifyBtn.disabled = !(modelsLoaded && cameraReady && currentDescriptor && liveness.left && liveness.right && liveness.blink) || verificationBusy || attemptsRemaining <= 0;
+    verifyBtn.disabled = !(modelsLoaded && cameraReady && currentDescriptor && liveness.front && liveness.blink) || verificationBusy || attemptsRemaining <= 0;
 }
 
 function updateAttempts() {
@@ -218,12 +215,7 @@ async function monitorLiveness() {
     currentDescriptor = Array.from(detection.descriptor);
 
     const yaw = getYawRatio(detection);
-    if (yaw <= -0.10) {
-        liveness.left = true;
-    }
-    if (yaw >= 0.10) {
-        liveness.right = true;
-    }
+    liveness.front = yaw >= -0.05 && yaw <= 0.05;
 
     const leftEAR = eyeAspectRatio(detection.landmarks.getLeftEye());
     const rightEAR = eyeAspectRatio(detection.landmarks.getRightEye());
@@ -237,10 +229,10 @@ async function monitorLiveness() {
         blinkClosed = false;
     }
 
-    if (liveness.left && liveness.right && liveness.blink) {
-        setStatus('Liveness checks completed. You can verify your face now.', 'success');
+    if (liveness.front && liveness.blink) {
+        setStatus('Front-face and blink checks completed. You can verify your face now.', 'success');
     } else {
-        setStatus('Complete the head movement and blink checks to unlock verification.', 'info');
+        setStatus('Look straight at the camera and blink once to unlock verification.', 'info');
     }
 
     updateChecks();
@@ -305,7 +297,7 @@ window.addEventListener('load', async () => {
 
     try {
         await loadModels();
-        setStatus('Camera ready. Turn left, turn right, and blink once.', 'info');
+        setStatus('Camera ready. Look straight at the camera and blink once.', 'info');
         updateChecks();
         setInterval(() => {
             monitorLiveness().catch(() => {

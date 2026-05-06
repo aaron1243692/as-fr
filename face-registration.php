@@ -30,7 +30,7 @@
         <section class="flex flex-1 flex-col gap-4 rounded-4 bg-white p-4 shadow">
             <div class="flex flex-col gap-2">
                 <h2 class="text-2xl font-semibold">Face Registration</h2>
-                <p class="text-sm text-gray-600">Capture three views of your face. The system stores embeddings and angle-tagged reference images for later verification.</p>
+                <p class="text-sm text-gray-600">Capture one clear front view of your face. The system stores a front-face embedding and reference image for later verification.</p>
                 <p class="text-sm text-gray-500">Current saved views: <?= count($savedViews) ? htmlspecialchars(implode(', ', $savedViews)) : 'none' ?></p>
             </div>
 
@@ -44,7 +44,7 @@
                         Loading camera and face models...
                     </div>
 
-                    <div class="grid grid-cols-1 gap-3 md:grid-cols-3 lg:grid-cols-1">
+                    <div class="grid grid-cols-1 gap-3">
                         <div class="rounded-3 border p-3">
                             <div class="mb-2 flex items-center justify-between">
                                 <h3 class="font-semibold">Front</h3>
@@ -54,33 +54,13 @@
                             <img id="preview-front" class="mt-3 hidden h-28 w-full rounded-3 object-cover" alt="Front preview">
                             <button type="button" class="capture-btn mt-3 rounded-3 bg-slate-900 px-4 py-2 text-sm font-semibold text-white" data-angle="front">Capture Front</button>
                         </div>
-
-                        <div class="rounded-3 border p-3">
-                            <div class="mb-2 flex items-center justify-between">
-                                <h3 class="font-semibold">Left</h3>
-                                <span id="badge-left" class="rounded-full bg-gray-200 px-3 py-1 text-xs text-gray-700">Pending</span>
-                            </div>
-                            <p class="text-sm text-gray-600">Turn your head slightly to your left.</p>
-                            <img id="preview-left" class="mt-3 hidden h-28 w-full rounded-3 object-cover" alt="Left preview">
-                            <button type="button" class="capture-btn mt-3 rounded-3 bg-slate-900 px-4 py-2 text-sm font-semibold text-white" data-angle="left">Capture Left</button>
-                        </div>
-
-                        <div class="rounded-3 border p-3">
-                            <div class="mb-2 flex items-center justify-between">
-                                <h3 class="font-semibold">Right</h3>
-                                <span id="badge-right" class="rounded-full bg-gray-200 px-3 py-1 text-xs text-gray-700">Pending</span>
-                            </div>
-                            <p class="text-sm text-gray-600">Turn your head slightly to your right.</p>
-                            <img id="preview-right" class="mt-3 hidden h-28 w-full rounded-3 object-cover" alt="Right preview">
-                            <button type="button" class="capture-btn mt-3 rounded-3 bg-slate-900 px-4 py-2 text-sm font-semibold text-white" data-angle="right">Capture Right</button>
-                        </div>
                     </div>
                 </div>
             </div>
 
             <form id="registrationForm" action="config/face-registration.php" method="post" class="flex items-center justify-between gap-3">
                 <input type="hidden" name="face_payload" id="face_payload">
-                <p class="text-sm text-gray-500">All three angles are required before you can save.</p>
+                <p class="text-sm text-gray-500">One front-facing sample is required before you can save.</p>
                 <button type="submit" id="saveBtn" class="rounded-3 bg-blue-600 px-5 py-2 font-semibold text-white disabled:cursor-not-allowed disabled:opacity-50" disabled>Save Face Registration</button>
             </form>
         </section>
@@ -97,9 +77,7 @@ let modelsLoaded = false;
 let streamStarted = false;
 
 const angleRules = {
-    front: { min: -0.03, max: 0.03 },
-    left: { min: 0.035, max: 0.18 },
-    right: { min: -0.18, max: -0.035 }
+    front: { min: -0.03, max: 0.03 }
 };
 
 function setStatus(message, type = 'info') {
@@ -114,7 +92,7 @@ function setStatus(message, type = 'info') {
 }
 
 function updateSaveState() {
-    const ready = ['front', 'left', 'right'].every((angle) => Boolean(captures[angle]));
+    const ready = Boolean(captures.front);
     saveBtn.disabled = !ready;
     payloadInput.value = ready ? JSON.stringify(captures) : '';
 }
@@ -141,7 +119,7 @@ async function loadModels() {
     ]);
 
     modelsLoaded = true;
-    setStatus('Models loaded. Capture front, left, and right face views.', 'success');
+    setStatus('Models loaded. Capture one front-facing face view.', 'success');
 }
 
 async function startCamera() {
@@ -186,7 +164,7 @@ async function captureAngle(angle) {
     const yaw = getYaw(detection.landmarks);
     const rule = angleRules[angle];
     if (yaw < rule.min || yaw > rule.max) {
-        setStatus(`Pose does not match the ${angle} capture yet. Adjust your head and try again.`, 'warning');
+        setStatus('Pose does not match a front-facing capture yet. Look straight at the camera and try again.', 'warning');
         return;
     }
 
@@ -226,7 +204,7 @@ document.getElementById('registrationForm').addEventListener('submit', (event) =
     updateSaveState();
     if (!payloadInput.value) {
         event.preventDefault();
-        setStatus('All three face angles are required before saving.', 'warning');
+        setStatus('A front-facing face sample is required before saving.', 'warning');
     }
 });
 

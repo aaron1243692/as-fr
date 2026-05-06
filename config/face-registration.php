@@ -12,7 +12,7 @@ if (empty($_SESSION['id'])) {
 }
 
 $userId = (int) $_SESSION['id'];
-$requiredAngles = ['front', 'left', 'right'];
+$requiredAngles = ['front'];
 
 $payloadRaw = $_POST['face_payload'] ?? '';
 $payload = json_decode($payloadRaw, true);
@@ -54,7 +54,7 @@ foreach ($requiredAngles as $angle) {
     $image = is_array($sample) ? ($sample['image'] ?? null) : null;
 
     if (!is_array($descriptor) || count($descriptor) !== 128) {
-        $_SESSION['message'] = "All three face angles are required with valid embeddings.";
+        $_SESSION['message'] = "A front-facing sample with a valid embedding is required.";
         header("location: ../face-registration.php");
         exit;
     }
