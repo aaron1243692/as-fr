@@ -47,7 +47,7 @@ $attemptsRemaining = max(0, FACE_AUTH_MAX_ATTEMPTS - $attemptsUsed);
             <div class="flex items-start justify-between gap-4">
                 <div>
                     <h2 class="text-2xl font-bold text-gray-800">Face Verification Required</h2>
-                    <p class="text-gray-600 mb-0">Your password is correct. Complete the live face check before entering the system.</p>
+                    <p class="text-gray-600 mb-0">Your password is correct. The system will capture and verify your face automatically as soon as it is detected.</p>
                 </div>
                 <a href="logout.php" class="px-4 py-2 rounded bg-gray-800 text-white hover:bg-black transition">Cancel</a>
             </div>
@@ -59,14 +59,13 @@ $attemptsRemaining = max(0, FACE_AUTH_MAX_ATTEMPTS - $attemptsUsed);
 
                 <div class="flex flex-col gap-4">
                     <div id="statusBox" class="rounded border border-blue-200 bg-blue-50 text-blue-700 px-4 py-3">
-                        Preparing camera and face verification...
+                        Preparing camera and automatic face verification...
                     </div>
 
                     <div class="rounded border p-4 bg-gray-50">
-                        <p class="font-semibold text-gray-800 mb-2">Liveness checklist</p>
+                        <p class="font-semibold text-gray-800 mb-2">Detection status</p>
                         <div class="grid gap-2 text-sm">
-                            <div id="check-front" class="text-gray-600">Hold a front-facing pose</div>
-                            <div id="check-blink" class="text-gray-600">Blink once</div>
+                            <div id="check-face" class="text-gray-600">Face detected</div>
                         </div>
                     </div>
 
@@ -77,8 +76,8 @@ $attemptsRemaining = max(0, FACE_AUTH_MAX_ATTEMPTS - $attemptsUsed);
                     </div>
 
                     <div class="flex gap-3">
-                        <button type="button" id="verifyBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                            Verify Face
+                        <button type="button" id="retryBtn" class="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition">
+                            Retry Scan
                         </button>
                         <a href="logout.php" class="px-4 py-2 bg-gray-600 text-white rounded hover:bg-gray-700 transition">Log Out</a>
                     </div>
@@ -92,21 +91,20 @@ const MODEL_PATH = 'models';
 const MAX_ATTEMPTS = <?php echo FACE_AUTH_MAX_ATTEMPTS; ?>;
 const video = document.getElementById('video');
 const statusBox = document.getElementById('statusBox');
-const verifyBtn = document.getElementById('verifyBtn');
+const retryBtn = document.getElementById('retryBtn');
 const attemptsBox = document.getElementById('attemptsBox');
 
 const checks = {
-    front: document.getElementById('check-front'),
-    blink: document.getElementById('check-blink')
+    face: document.getElementById('check-face')
 };
 
 let modelsLoaded = false;
 let cameraReady = false;
 let currentDescriptor = null;
-let blinkClosed = false;
 let verificationBusy = false;
 let attemptsRemaining = <?php echo $attemptsRemaining; ?>;
-const liveness = { front: false, blink: false };
+let awaitingFaceReset = false;
+const liveness = { front: true, blink: true };
 
 function setStatus(message, tone = 'info') {
     const classMap = {
@@ -121,35 +119,12 @@ function setStatus(message, tone = 'info') {
 }
 
 function updateChecks() {
-    checks.front.className = liveness.front ? 'text-green-600 font-semibold' : 'text-gray-600';
-    checks.blink.className = liveness.blink ? 'text-green-600 font-semibold' : 'text-gray-600';
-    verifyBtn.disabled = !(modelsLoaded && cameraReady && currentDescriptor && liveness.front && liveness.blink) || verificationBusy || attemptsRemaining <= 0;
+    checks.face.className = currentDescriptor ? 'text-green-600 font-semibold' : 'text-gray-600';
+    retryBtn.disabled = verificationBusy;
 }
 
 function updateAttempts() {
     attemptsBox.textContent = `${attemptsRemaining} of ${MAX_ATTEMPTS}`;
-}
-
-function distance(pointA, pointB) {
-    return Math.hypot(pointA.x - pointB.x, pointA.y - pointB.y);
-}
-
-function eyeAspectRatio(points) {
-    const vertical1 = distance(points[1], points[5]);
-    const vertical2 = distance(points[2], points[4]);
-    const horizontal = distance(points[0], points[3]);
-    return (vertical1 + vertical2) / (2.0 * Math.max(horizontal, 1));
-}
-
-function getYawRatio(detection) {
-    const jaw = detection.landmarks.getJawOutline();
-    const nose = detection.landmarks.getNose();
-    const faceLeft = jaw[0].x;
-    const faceRight = jaw[16].x;
-    const faceCenter = (faceLeft + faceRight) / 2;
-    const noseCenter = nose[3].x;
-    const faceWidth = Math.max(faceRight - faceLeft, 1);
-    return (noseCenter - faceCenter) / faceWidth;
 }
 
 async function loadModels() {
@@ -207,35 +182,25 @@ async function monitorLiveness() {
 
     if (!detection) {
         currentDescriptor = null;
-        setStatus('Face not detected. Keep your face centered in the camera.', 'warn');
+        if (awaitingFaceReset) {
+            awaitingFaceReset = false;
+            setStatus('Face cleared. Return to the frame to retry.', 'info');
+        } else {
+            setStatus('Face not detected. Keep your face centered in the camera.', 'warn');
+        }
         updateChecks();
         return;
     }
 
     currentDescriptor = Array.from(detection.descriptor);
-
-    const yaw = getYawRatio(detection);
-    liveness.front = yaw >= -0.05 && yaw <= 0.05;
-
-    const leftEAR = eyeAspectRatio(detection.landmarks.getLeftEye());
-    const rightEAR = eyeAspectRatio(detection.landmarks.getRightEye());
-    const averageEAR = (leftEAR + rightEAR) / 2;
-
-    if (averageEAR < 0.21) {
-        blinkClosed = true;
-    }
-    if (blinkClosed && averageEAR > 0.26) {
-        liveness.blink = true;
-        blinkClosed = false;
-    }
-
-    if (liveness.front && liveness.blink) {
-        setStatus('Front-face and blink checks completed. You can verify your face now.', 'success');
-    } else {
-        setStatus('Look straight at the camera and blink once to unlock verification.', 'info');
-    }
-
     updateChecks();
+
+    if (awaitingFaceReset || attemptsRemaining <= 0) {
+        return;
+    }
+
+    setStatus('Face detected. Verifying automatically...', 'success');
+    await verifyFace();
 }
 
 async function verifyFace() {
@@ -276,6 +241,7 @@ async function verifyFace() {
             return;
         }
 
+        awaitingFaceReset = true;
         setStatus(result.message || 'Face verification failed.', 'error');
     } catch (error) {
         setStatus('Connection error while verifying your face.', 'error');
@@ -285,7 +251,12 @@ async function verifyFace() {
     }
 }
 
-verifyBtn.addEventListener('click', verifyFace);
+retryBtn.addEventListener('click', () => {
+    currentDescriptor = null;
+    awaitingFaceReset = false;
+    updateChecks();
+    setStatus('Retry ready. Look at the camera to scan again.', 'info');
+});
 
 window.addEventListener('load', async () => {
     updateAttempts();
@@ -297,7 +268,7 @@ window.addEventListener('load', async () => {
 
     try {
         await loadModels();
-        setStatus('Camera ready. Look straight at the camera and blink once.', 'info');
+        setStatus('Camera ready. Look at the camera and the system will verify automatically.', 'info');
         updateChecks();
         setInterval(() => {
             monitorLiveness().catch(() => {
